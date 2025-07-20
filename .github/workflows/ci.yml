@@ -1,0 +1,66 @@
+name: TeaThis CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v ./...
+
+  build:
+    name: Build and Verify
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Go dependencies
+        run: go mod download
+
+      - name: Install frontend dependencies
+        working-directory: ./web
+        run: npm install
+
+      - name: Build frontend
+        working-directory: ./web
+        run: npm run build
+
+      - name: Build backend
+        run: go build -v -o teathis-server
+
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: teathis-dist
+          path: |
+            teathis-server
+            web/build/

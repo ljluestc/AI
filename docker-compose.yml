@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  teathis-app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./workspace:/app/workspace
+    environment:
+      - GIN_MODE=release
+      - PORT=8080
+    restart: unless-stopped
+
+  # Optional Neo4j database for advanced graph storage
+  neo4j:
+    image: neo4j:5.11
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/import
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_memory_heap_max__size=2G
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
