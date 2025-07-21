@@ -39,7 +39,7 @@ func NewVisionTransformer(numFrames int, useDepth bool) *VisionTransformer {
 }
 
 // Process processes the vision input and returns the cursor state
-func (vt *VisionTransformer) Process(input VisionInput) (*CursorState, error) {
+func (vt *VisionTransformer) Process(input VisionInput) (*EnhancedCursorState, error) {
 	// Basic validation
 	if len(input.RGBFrames) == 0 {
 		return nil, errors.New("no RGB frames provided")
@@ -70,7 +70,7 @@ func (vt *VisionTransformer) Process(input VisionInput) (*CursorState, error) {
 	}
 
 	// Create cursor state with the average position
-	return &CursorState{
+	return &EnhancedCursorState{
 		Position:     [3]float64{sumX / count, sumY / count, sumZ / count},
 		Velocity:     [3]float64{0, 0, 0}, // Simplified: no velocity calculation
 		Acceleration: [3]float64{0, 0, 0}, // Simplified: no acceleration calculation
