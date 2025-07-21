@@ -25,7 +25,21 @@ clean:
 # Install dependencies
 install-deps:
 	go mod download
+	go get github.com/go-git/go-git/v5
+	go get github.com/neo4j/neo4j-go-driver/v4
+	go get gonum.org/v1/gonum
+	go mod tidy
+	go get github.com/go-git/go-git/v5
+	go get github.com/neo4j/neo4j-go-driver/v4/neo4j
+	go get github.com/gorilla/mux
+	go get github.com/stretchr/testify
+	go get gonum.org/v1/gonum
 	cd web && npm install
+	
+	# Fetch all dependencies and update go.sum
+	fetch-deps:
+	chmod +x scripts/fetch_dependencies.sh
+	./scripts/fetch_dependencies.sh
 
 # Build Docker image
 docker-build:

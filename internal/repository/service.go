@@ -1,98 +1,138 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
-	"github.com/go-git/go-git/v5"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// RepoInfo represents information about a cloned repository
+// RepoInfo contains information about a repository
 type RepoInfo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"`
-	Path      string    `json:"path"`
-	ClonedAt  time.Time `json:"clonedAt"`
-	LastScan  time.Time `json:"lastScan,omitempty"`
-	ErrorsNum int       `json:"errorsNum"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Path     string    `json:"path"`
+	URL      string    `json:"url"`
+	ClonedAt time.Time `json:"clonedAt"`
+}
+
+// FileInfo contains information about a file in a repository
+type FileInfo struct {
+	Path     string `json:"path"`
+	Language string `json:"language"`
+	Size     int64  `json:"size"`
 }
 
 // Service provides repository operations
 type Service struct {
-	workspaceDir string
+	WorkspacePath string
 }
 
 // NewService creates a new repository service
-func NewService(workspaceDir string) *Service {
-	return &Service{
-		workspaceDir: workspaceDir,
+func NewService(workspacePath string) (*Service, error) {
+	// Create workspace directory if it doesn't exist
+	if err := os.MkdirAll(workspacePath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create workspace directory: %w", err)
 	}
+
+	return &Service{
+		WorkspacePath: workspacePath,
+	}, nil
 }
 
-// CloneRepo clones a git repository to the workspace
-func (s *Service) CloneRepo(repoURL string) (string, error) {
-	// Extract repo name from URL
-	urlParts := strings.Split(repoURL, "/")
-	repoName := strings.TrimSuffix(urlParts[len(urlParts)-1], ".git")
+// CloneRepository clones a Git repository
+func (s *Service) CloneRepository(url string) (*RepoInfo, error) {
+	// Extract repository name from URL
+	repoName := filepath.Base(url)
+	if filepath.Ext(repoName) == ".git" {
+		repoName = repoName[:len(repoName)-4]
+	}
 
 	// Create a unique directory name
 	timestamp := time.Now().Format("20060102150405")
-	repoDir := fmt.Sprintf("%s-%s", repoName, timestamp)
-	fullPath := filepath.Join(s.workspaceDir, repoDir)
+	dirName := fmt.Sprintf("%s-%s", repoName, timestamp)
+	repoPath := filepath.Join(s.WorkspacePath, dirName)
 
 	// Clone the repository
-	_, err := git.PlainClone(fullPath, false, &git.CloneOptions{
-		URL:      repoURL,
+	repo, err := git.PlainClone(repoPath, false, &git.CloneOptions{
+		URL:      url,
 		Progress: os.Stdout,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to clone repository: %w", err)
+		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
 
-	return repoDir, nil
+	// Get repository info
+	head, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository head: %w", err)
+	}
+
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get head commit: %w", err)
+	}
+
+	return &RepoInfo{
+		ID:       dirName,
+		Name:     repoName,
+		Path:     dirName,
+		URL:      url,
+		ClonedAt: commit.Committer.When,
+	}, nil
 }
 
-// ListRepos returns information about all cloned repositories
-func (s *Service) ListRepos() ([]RepoInfo, error) {
-	var repos []RepoInfo
-
-	// Read the workspace directory
-	entries, err := os.ReadDir(s.workspaceDir)
+// ListRepositories lists all repositories in the workspace
+func (s *Service) ListRepositories() ([]RepoInfo, error) {
+	entries, err := os.ReadDir(s.WorkspacePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read workspace directory: %w", err)
 	}
 
-	// Iterate through each entry and check if it's a git repository
+	repos := []RepoInfo{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 
-		fullPath := filepath.Join(s.workspaceDir, entry.Name())
-
-		// Check if it's a git repository
-		_, err := git.PlainOpen(fullPath)
-		if err != nil {
-			continue // Not a git repository, skip
-		}
-
-		// Get directory info
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
 
-		// Get repository name (without timestamp)
-		nameParts := strings.Split(entry.Name(), "-")
-		name := strings.Join(nameParts[:len(nameParts)-1], "-")
+		repoPath := filepath.Join(s.WorkspacePath, entry.Name())
+		repo, err := git.PlainOpen(repoPath)
+		if err != nil {
+			// Not a Git repository, skip
+			continue
+		}
+
+		config, err := repo.Config()
+		if err != nil {
+			continue
+		}
+
+		url := ""
+		if config.Remotes["origin"] != nil && len(config.Remotes["origin"].URLs) > 0 {
+			url = config.Remotes["origin"].URLs[0]
+		}
+
+		repoName := entry.Name()
+		// Remove timestamp if present
+		if len(repoName) > 15 && repoName[len(repoName)-15] == '-' {
+			repoName = repoName[:len(repoName)-15]
+		}
 
 		repos = append(repos, RepoInfo{
 			ID:       entry.Name(),
-			Name:     name,
+			Name:     repoName,
 			Path:     entry.Name(),
+			URL:      url,
 			ClonedAt: info.ModTime(),
 		})
 	}
@@ -100,33 +140,142 @@ func (s *Service) ListRepos() ([]RepoInfo, error) {
 	return repos, nil
 }
 
-// GetRepoByID returns information about a specific repository
-func (s *Service) GetRepoByID(repoID string) (*RepoInfo, error) {
-	fullPath := filepath.Join(s.workspaceDir, repoID)
+// GetRepository gets a repository by ID
+func (s *Service) GetRepository(id string) (*RepoInfo, error) {
+	repoPath := filepath.Join(s.WorkspacePath, id)
 
-	// Check if the directory exists
-	info, err := os.Stat(fullPath)
-	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("repository not found")
+	// Check if the repository exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		return nil, errors.New("repository not found")
 	}
+
+	// Open the repository
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// Get repository info
+	config, err := repo.Config()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository config: %w", err)
+	}
+
+	url := ""
+	if config.Remotes["origin"] != nil && len(config.Remotes["origin"].URLs) > 0 {
+		url = config.Remotes["origin"].URLs[0]
+	}
+
+	// Get repository name
+	repoName := id
+	if len(repoName) > 15 && repoName[len(repoName)-15] == '-' {
+		repoName = repoName[:len(repoName)-15]
+	}
+
+	// Get repository creation time
+	fileInfo, err := os.Stat(repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get repository info: %w", err)
 	}
 
-	// Check if it's a git repository
-	_, err = git.PlainOpen(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("not a valid git repository: %w", err)
+	return &RepoInfo{
+		ID:       id,
+		Name:     repoName,
+		Path:     id,
+		URL:      url,
+		ClonedAt: fileInfo.ModTime(),
+	}, nil
+}
+
+// ListFiles lists all files in a repository
+func (s *Service) ListFiles(repoID string) ([]FileInfo, error) {
+	repoPath := filepath.Join(s.WorkspacePath, repoID)
+
+	// Check if the repository exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		return nil, errors.New("repository not found")
 	}
 
-	// Get repository name (without timestamp)
-	nameParts := strings.Split(repoID, "-")
-	name := strings.Join(nameParts[:len(nameParts)-1], "-")
+	// Open the repository
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository: %w", err)
+	}
 
-	return &RepoInfo{
-		ID:       repoID,
-		Name:     name,
-		Path:     repoID,
-		ClonedAt: info.ModTime(),
-	}, nil
+	// Get the HEAD reference
+	head, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository head: %w", err)
+	}
+
+	// Get the commit object for the HEAD reference
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get head commit: %w", err)
+	}
+
+	// Get the tree for the commit
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit tree: %w", err)
+	}
+
+	// Create a list to store file info
+	files := []FileInfo{}
+
+	// Iterate through the tree
+	err = tree.Files().ForEach(func(f *object.File) error {
+		// Skip directories
+		if f.Mode&0040000 == 0040000 {
+			return nil
+		}
+
+		// Get file info
+		language := detectLanguage(f.Name)
+		size := f.Size
+
+		files = append(files, FileInfo{
+			Path:     f.Name,
+			Language: language,
+			Size:     size,
+		})
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate through files: %w", err)
+	}
+
+	return files, nil
+}
+
+// detectLanguage detects the language of a file based on its extension
+func detectLanguage(filename string) string {
+	ext := filepath.Ext(filename)
+	switch ext {
+	case ".go":
+		return "Go"
+	case ".js", ".jsx":
+		return "JavaScript"
+	case ".ts", ".tsx":
+		return "TypeScript"
+	case ".py":
+		return "Python"
+	case ".java":
+		return "Java"
+	case ".c", ".cpp", ".cc", ".h", ".hpp":
+		return "C/C++"
+	case ".html", ".htm":
+		return "HTML"
+	case ".css":
+		return "CSS"
+	case ".md":
+		return "Markdown"
+	case ".json":
+		return "JSON"
+	case ".yaml", ".yml":
+		return "YAML"
+	default:
+		return "Unknown"
+	}
 }
