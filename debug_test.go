@@ -110,26 +110,12 @@ func (m *MockNeo4jResult) Consume() (neo4j.ResultSummary, error) {
 
 // MockNeo4jRecord implements a mock Neo4j record for testing
 type MockNeo4jRecord struct {
-	mock.Mock
-	values []interface{}
 	keys   []string
+	values []interface{}
 }
 
-func NewMockNeo4jRecord(values []interface{}, keys []string) *MockNeo4jRecord {
-	return &MockNeo4jRecord{
-		values: values,
-		keys:   keys,
-	}
-}
-
-func (m *MockNeo4jRecord) Keys() []string {
-	return m.keys
-}
-
-func (m *MockNeo4jRecord) Values() []interface{} {
-	return m.values
-}
-
+func (m *MockNeo4jRecord) Keys() []string        { return m.keys }
+func (m *MockNeo4jRecord) Values() []interface{} { return m.values }
 func (m *MockNeo4jRecord) Get(key string) (interface{}, bool) {
 	for i, k := range m.keys {
 		if k == key {
@@ -138,9 +124,6 @@ func (m *MockNeo4jRecord) Get(key string) (interface{}, bool) {
 	}
 	return nil, false
 }
-
-// MockNeo4jRecord implements neo4j.Record interface
-// Use type assertion workaround for tests
 func (m *MockNeo4jRecord) GetByIndex(index int) interface{} {
 	if index >= 0 && index < len(m.values) {
 		return m.values[index]
@@ -151,11 +134,22 @@ func (m *MockNeo4jRecord) Len() int {
 	return len(m.values)
 }
 
+// NewMockRecord creates a new MockNeo4jRecord that implements neo4j.Record
+func NewMockNeo4jRecord(values []interface{}, keys []string) *MockNeo4jRecord {
+	return &MockNeo4jRecord{
+		values: values,
+		keys:   keys,
+	}
+}
+
 // TestKnowledgeGraph tests the knowledge graph functionality
 func TestKnowledgeGraph(t *testing.T) {
 	// Create mock Neo4j driver and session
 	mockDriver := new(MockNeo4jDriver)
 	mockSession := new(MockNeo4jSession)
+
+	// Create a knowledge graph with the mock driver
+	kg, _ := knowledge.NewKnowledgeGraph("neo4j://localhost:7687", "neo4j", "password")
 
 	// Create mock records and result
 	mockRecords := []neo4j.Record{
@@ -171,13 +165,12 @@ func TestKnowledgeGraph(t *testing.T) {
 	mockResult.On("Err").Return(nil)
 	mockResult.On("Consume").Return(nil, nil)
 
-	// Create a knowledge graph with the mock driver
-	kg := knowledge.NewKnowledgeGraph(nil) // Pass nil or a mock driver as needed
+	// The knowledge graph is already created above, so this line should be removed
 
 	// Create a test state
 	state := vision.CursorState{
 		Position: [3]float64{0.5, 0.6, 0.7},
-		Mask:     [][][]float64{{{0.1, 0.2}, {0.3, 0.4}}},
+		// Remove or update Mask field if it doesn't exist
 	}
 
 	// Diagnose the issue
@@ -209,24 +202,81 @@ func TestAPIHandlers(t *testing.T) {
 
 	// Create a test router
 	r := mux.NewRouter()
-	// Use actual agent methods, not local stubs
-	r.HandleFunc("/vision", ag.HandleVision).Methods("POST")
-	r.HandleFunc("/diagnosis", ag.HandleDiagnosis).Methods("POST")
-	r.HandleFunc("/planning", ag.HandlePlanning).Methods("POST")
-	r.HandleFunc("/execution", ag.HandleExecution).Methods("POST")
+	// Use wrapper HTTP handlers for planning and execution
+	r.HandleFunc("/vision", func(w http.ResponseWriter, r *http.Request) {
+		// Call ag.HandleVision with appropriate input
+		// Example:
+		var input vision.VisionInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, "Invalid input", http.StatusBadRequest)
+			return
+		}
+		result, err := ag.HandleVision(input)
+		if err != nil {
+			http.Error(w, "Vision failed", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}).Methods("POST")
+	r.HandleFunc("/diagnosis", func(w http.ResponseWriter, r *http.Request) {
+		// Call ag.HandleDiagnosis with appropriate input
+		var state vision.CursorState
+		if err := json.NewDecoder(r.Body).Decode(&state); err != nil {
+			http.Error(w, "Invalid input", http.StatusBadRequest)
+			return
+		}
+		result, err := ag.HandleDiagnosis(&state)
+		if err != nil {
+			http.Error(w, "Diagnosis failed", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}).Methods("POST")
+	r.HandleFunc("/planning", func(w http.ResponseWriter, req *http.Request) {
+		// Wrap ag.HandlePlanning for HTTP
+		var state vision.CursorState
+		if err := json.NewDecoder(req.Body).Decode(&state); err != nil {
+			http.Error(w, "Invalid input", http.StatusBadRequest)
+			return
+		}
+		action, err := ag.HandlePlanning(&state)
+		if err != nil {
+			http.Error(w, "Planning failed", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(action)
+	}).Methods("POST")
+	r.HandleFunc("/execution", func(w http.ResponseWriter, req *http.Request) {
+		// Wrap ag.HandleExecution for HTTP
+		var action rl.Action
+		if err := json.NewDecoder(req.Body).Decode(&action); err != nil {
+			http.Error(w, "Invalid input", http.StatusBadRequest)
+			return
+		}
+		result, err := ag.HandleExecution(action)
+		if err != nil {
+			http.Error(w, "Execution failed", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}).Methods("POST")
 
 	// Test the vision handler
 	visionInput := vision.VisionInput{
-		RGBFrames: [][][]float64{
+		RGBFrames: [][][][]float64{
 			{
-				{1.0, 2.0, 3.0},
-				{4.0, 5.0, 6.0},
+				{
+					{1.0, 2.0, 3.0},
+					{4.0, 5.0, 6.0},
+				},
 			},
 		},
-		DepthFrames: [][][]float64{
+		DepthFrames: [][][][]float64{
 			{
-				{0.5, 0.6, 0.7},
-				{0.8, 0.9, 1.0},
+				{
+					{0.5, 0.6, 0.7},
+					{0.8, 0.9, 1.0},
+				},
 			},
 		},
 	}
@@ -244,7 +294,7 @@ func TestAPIHandlers(t *testing.T) {
 	// Test the diagnosis handler
 	diagnosisInput := vision.CursorState{
 		Position: [3]float64{0.5, 0.6, 0.7},
-		Mask:     [][][]float64{{{0.1, 0.2}, {0.3, 0.4}}},
+		// Remove Mask field if it doesn't exist in CursorState
 	}
 	diagnosisBody, _ := json.Marshal(diagnosisInput)
 	req, _ = http.NewRequest("POST", "/diagnosis", bytes.NewBuffer(diagnosisBody))

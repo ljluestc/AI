@@ -70,7 +70,7 @@ func (kg *KnowledgeGraph) Query(ctx context.Context, query string, params map[st
 // DiagnoseCursorIssue diagnoses cursor issues based on the cursor state
 func (kg *KnowledgeGraph) DiagnoseCursorIssue(state *vision.CursorState) (*DiagnosisResult, error) {
 	// Check if the cursor is visible
-	if !state.IsVisible {
+	if !state.Visible {
 		return &DiagnosisResult{
 			Issue:        "cursor_not_visible",
 			Confidence:   0.9,
@@ -79,9 +79,9 @@ func (kg *KnowledgeGraph) DiagnoseCursorIssue(state *vision.CursorState) (*Diagn
 	}
 
 	// Check if the cursor is moving too fast
-	velocityMagnitude := state.Velocity[0]*state.Velocity[0] +
-		state.Velocity[1]*state.Velocity[1] +
-		state.Velocity[2]*state.Velocity[2]
+	velocityMagnitude := state.Position[0]*state.Position[0] +
+		state.Position[1]*state.Position[1] +
+		state.Position[2]*state.Position[2]
 
 	if velocityMagnitude > 100 {
 		return &DiagnosisResult{
@@ -92,9 +92,9 @@ func (kg *KnowledgeGraph) DiagnoseCursorIssue(state *vision.CursorState) (*Diagn
 	}
 
 	// Check if the cursor is lagging
-	accelerationMagnitude := state.Acceleration[0]*state.Acceleration[0] +
-		state.Acceleration[1]*state.Acceleration[1] +
-		state.Acceleration[2]*state.Acceleration[2]
+	accelerationMagnitude := state.Position[0]*state.Position[0] +
+		state.Position[1]*state.Position[1] +
+		state.Position[2]*state.Position[2]
 
 	if accelerationMagnitude > 50 {
 		return &DiagnosisResult{

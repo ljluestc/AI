@@ -8,27 +8,29 @@ import (
 
 	"github.com/teathis/codeanalyzer/internal/agent"
 	"github.com/teathis/codeanalyzer/internal/memory"
+	"github.com/teathis/codeanalyzer/pkg/optimizer"
 )
 
 // TestDQNInitialization tests DQN initialization
 func TestDQNInitialization(t *testing.T) {
 	stateDim := 768
 	actionDim := 10
-	memory := &memory.BuddyMemory{Size: 1024 * 1024, Allocated: make(map[int]bool)}
+	memory := &memory.BuddyMemory{} // Initialize using methods instead of direct field access
+	memory.Clear()                  // Clear will initialize the experiences slice
 
 	dqn := &agent.DQN{
-		StateDim:      stateDim,
-		ActionDim:     actionDim,
-		QNetwork:      mat.NewDense(stateDim, actionDim, nil),
-		TargetNetwork: mat.NewDense(stateDim, actionDim, nil),
-		Memory:        memory,
-		Optimizer:     &agent.AdamOptimizer{LearningRate: 0.001, Beta1: 0.9, Beta2: 0.999},
+		StateDim:       stateDim,
+		ActionDim:      actionDim,
+		QNetwork:       mat.NewDense(stateDim, actionDim, nil),
+		TargetQNetwork: mat.NewDense(stateDim, actionDim, nil),
+		Memory:         memory,
+		Optimizer:      optimizer.NewAdam(0.001, 0.9, 0.999),
 	}
 
 	assert.Equal(t, stateDim, dqn.StateDim)
 	assert.Equal(t, actionDim, dqn.ActionDim)
 	assert.NotNil(t, dqn.QNetwork)
-	assert.NotNil(t, dqn.TargetNetwork)
+	assert.NotNil(t, dqn.TargetQNetwork)
 	assert.NotNil(t, dqn.Memory)
 	assert.NotNil(t, dqn.Optimizer)
 }
@@ -36,32 +38,33 @@ func TestDQNInitialization(t *testing.T) {
 // TestActionSelection tests DQN action selection
 func TestActionSelection(t *testing.T) {
 	dqn := &agent.DQN{
-		StateDim:      3,
-		ActionDim:     5,
-		QNetwork:      mat.NewDense(3, 5, nil),
-		TargetNetwork: mat.NewDense(3, 5, nil),
-		Memory:        &memory.BuddyMemory{Size: 1024, Allocated: make(map[int]bool)},
-		Optimizer:     &agent.AdamOptimizer{LearningRate: 0.001, Beta1: 0.9, Beta2: 0.999},
+		StateDim:       3,
+		ActionDim:      5,
+		QNetwork:       mat.NewDense(3, 5, nil),
+		TargetQNetwork: mat.NewDense(3, 5, nil),
+		Memory:         &memory.BuddyMemory{},
+		Optimizer:      optimizer.NewAdam(0.001, 0.9, 0.999),
 	}
 
 	// Set Q-values to have a clear maximum at action 2
-	dqn.QNetwork.Set(0, 0, 0.1)
-	dqn.QNetwork.Set(0, 1, 0.2)
-	dqn.QNetwork.Set(0, 2, 0.5) // max value
-	dqn.QNetwork.Set(0, 3, 0.3)
-	dqn.QNetwork.Set(0, 4, 0.4)
+	qNet := dqn.QNetwork.(*mat.Dense)
+	qNet.Set(0, 0, 0.1)
+	qNet.Set(0, 1, 0.2)
+	qNet.Set(0, 2, 0.5) // max value
+	qNet.Set(0, 3, 0.3)
+	qNet.Set(0, 4, 0.4)
 
-	dqn.QNetwork.Set(1, 0, 0.1)
-	dqn.QNetwork.Set(1, 1, 0.2)
-	dqn.QNetwork.Set(1, 2, 0.5) // max value
-	dqn.QNetwork.Set(1, 3, 0.3)
-	dqn.QNetwork.Set(1, 4, 0.4)
+	qNet.Set(1, 0, 0.1)
+	qNet.Set(1, 1, 0.2)
+	qNet.Set(1, 2, 0.5) // max value
+	qNet.Set(1, 3, 0.3)
+	qNet.Set(1, 4, 0.4)
 
-	dqn.QNetwork.Set(2, 0, 0.1)
-	dqn.QNetwork.Set(2, 1, 0.2)
-	dqn.QNetwork.Set(2, 2, 0.5) // max value
-	dqn.QNetwork.Set(2, 3, 0.3)
-	dqn.QNetwork.Set(2, 4, 0.4)
+	qNet.Set(2, 0, 0.1)
+	qNet.Set(2, 1, 0.2)
+	qNet.Set(2, 2, 0.5) // max value
+	qNet.Set(2, 3, 0.3)
+	qNet.Set(2, 4, 0.4)
 
 	// Test action selection
 	state := []float64{1.0, 0.0, 0.0} // Only first row should matter
@@ -70,23 +73,23 @@ func TestActionSelection(t *testing.T) {
 	// Should select action 2 with highest Q-value
 	assert.NoError(t, err)
 	assert.Equal(t, "action_2", action.ID) // Index 2 action
-	assert.NotEmpty(t, action.Description)
+	assert.NotEmpty(t, action.Desc)
 	assert.Len(t, action.Parameters, 1)
 }
 
 // TestDQNUpdate tests DQN update process
 func TestDQNUpdate(t *testing.T) {
 	dqn := &agent.DQN{
-		StateDim:      3,
-		ActionDim:     5,
-		QNetwork:      mat.NewDense(3, 5, nil),
-		TargetNetwork: mat.NewDense(3, 5, nil),
-		Memory:        &memory.BuddyMemory{Size: 1024, Allocated: make(map[int]bool)},
-		Optimizer:     &agent.AdamOptimizer{LearningRate: 0.001, Beta1: 0.9, Beta2: 0.999},
+		StateDim:       3,
+		ActionDim:      5,
+		QNetwork:       mat.NewDense(3, 5, nil),
+		TargetQNetwork: mat.NewDense(3, 5, nil),
+		Memory:         &memory.BuddyMemory{experiences: make([]memory.Experience, 0)},
+		Optimizer:      optimizer.NewAdam(0.001, 0.9, 0.999),
 	}
 
 	// Set initial Q-values
-	initialQValue := dqn.QNetwork.At(0, 0)
+	initialQValue := dqn.QNetwork.(*mat.Dense).At(0, 0)
 
 	// Prepare update inputs
 	states := []float64{1.0, 0.0, 0.0}
@@ -100,18 +103,14 @@ func TestDQNUpdate(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Q-value should have changed
-	updatedQValue := dqn.QNetwork.At(0, 0)
+	updatedQValue := dqn.QNetwork.(*mat.Dense).At(0, 0)
 	assert.NotEqual(t, initialQValue, updatedQValue)
 }
 
 // TestAdamOptimizer tests the Adam optimizer
 func TestAdamOptimizer(t *testing.T) {
-	optimizer := &agent.AdamOptimizer{
-		LearningRate: 0.01,
-		Beta1:        0.9,
-		Beta2:        0.999,
-		T:            1,
-	}
+	optimizer := optimizer.NewAdam(0.01, 0.9, 0.999)
+	optimizer.T = 1
 
 	// Create a test weights matrix
 	weights := mat.NewDense(2, 2, []float64{1.0, 2.0, 3.0, 4.0})
@@ -125,58 +124,43 @@ func TestAdamOptimizer(t *testing.T) {
 	assert.NotEqual(t, initialValue, updatedValue)
 }
 
-// TestBuddyMemoryAllocation tests buddy memory allocation and freeing
-func TestBuddyMemoryAllocation(t *testing.T) {
-	bm := &memory.BuddyMemory{
-		Size:      1024,
-		Allocated: make(map[int]bool),
+// TestBuddyMemory tests buddy memory operations
+func TestBuddyMemory(t *testing.T) {
+	bm := &memory.BuddyMemory{}
+	// Set capacity if there's a method to do so, otherwise it might use a default value
+
+	// Add an experience
+	exp1 := memory.Experience{
+		State:     []float64{1.0, 2.0},
+		Action:    1,
+		Reward:    0.5,
+		NextState: []float64{2.0, 3.0},
+		IsDone:    false,
 	}
 
-	// Allocate memory
-	addr1, err := bm.Allocate(256)
+	err := bm.Add(exp1)
 	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, addr1, 0)
-	assert.Less(t, addr1, bm.Size)
-	assert.True(t, bm.Allocated[addr1])
+	assert.Equal(t, 1, bm.Size())
 
-	// Allocate more memory
-	addr2, err := bm.Allocate(256)
+	// Add another experience
+	exp2 := memory.Experience{
+		State:     []float64{2.0, 3.0},
+		Action:    2,
+		Reward:    1.0,
+		NextState: []float64{3.0, 4.0},
+		IsDone:    false,
+	}
+
+	err = bm.Add(exp2)
 	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, addr2, 0)
-	assert.Less(t, addr2, bm.Size)
-	assert.NotEqual(t, addr1, addr2)
-	assert.True(t, bm.Allocated[addr2])
+	assert.Equal(t, 2, bm.Size())
 
-	// Free the first allocation
-	bm.Free(addr1)
-	assert.False(t, bm.Allocated[addr1])
-
-	// Re-allocate, should get first address back
-	addr3, err := bm.Allocate(256)
+	// Sample experiences
+	batch, err := bm.Sample(1)
 	assert.NoError(t, err)
-	assert.Equal(t, addr1, addr3)
-	assert.True(t, bm.Allocated[addr3])
+	assert.Equal(t, 1, len(batch))
 
-	// Test allocation exhaustion
-	// Allocate until full
-	addrs := []int{addr2, addr3}
-	for i := 0; i < 2; i++ { // Try to allocate 2 more blocks (total 4, but we only have space for 3)
-		addr, err := bm.Allocate(256)
-		if err == nil {
-			addrs = append(addrs, addr)
-		}
-	}
-
-	// Should have allocated 3 blocks (1024/256 = 4, but due to buddy system limitations, only 3 fit)
-	assert.LessOrEqual(t, len(addrs), 4)
-
-	// Free all allocations
-	for _, addr := range addrs {
-		bm.Free(addr)
-	}
-
-	// Check that all allocations are freed
-	for i := 0; i < bm.Size; i += 256 {
-		assert.False(t, bm.Allocated[i])
-	}
+	// Clear memory
+	bm.Clear()
+	assert.Equal(t, 0, bm.Size())
 }

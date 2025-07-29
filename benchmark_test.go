@@ -30,7 +30,8 @@ func BenchmarkVisionTransformer(b *testing.B) {
 
 // BenchmarkDQN benchmarks the DQN action selection performance
 func BenchmarkDQN(b *testing.B) {
-	dqn := rl.NewDQN(100, 10, rl.NewBuddyMemory(1024*1024))
+	memory := &rl.BuddyMemory{} // Removed Allocated field
+	dqn := rl.NewDQN(100, 10, memory)
 	state := make([]float64, 100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -43,7 +44,7 @@ func BenchmarkDQN(b *testing.B) {
 
 // BenchmarkBuddyMemoryAllocation benchmarks the buddy memory allocation performance
 func BenchmarkBuddyMemory(b *testing.B) {
-	bm := rl.NewBuddyMemory(1024 * 1024)
+	bm := &rl.BuddyMemory{} // Removed Allocated field
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		addr, err := bm.Allocate(1024)
@@ -85,21 +86,23 @@ func BenchmarkDebugAgent(b *testing.B) {
 		b.Fatalf("Failed to initialize DebugAgent: %v", err)
 	}
 
-	visionInput := vision.VisionInput{
-		RGBFrames: [][][]float64{
+	var visionInput = vision.VisionInput{
+		RGBFrames: [][][][]float64{
 			{
-				{1.0, 2.0, 3.0},
-				{4.0, 5.0, 6.0},
+				{
+					{1.0, 2.0, 3.0},
+				},
 			},
 		},
-		DepthFrames: [][][]float64{
+		DepthFrames: [][][][]float64{
 			{
-				{0.5, 0.6, 0.7},
-				{0.8, 0.9, 1.0},
+				{
+					{0.5, 0.6, 0.7},
+					{0.8, 0.9, 1.0},
+				},
 			},
 		},
 	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Step 1: Vision

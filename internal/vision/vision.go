@@ -71,10 +71,14 @@ func (vt *VisionTransformer) Process(input VisionInput) (*EnhancedCursorState, e
 
 	// Create cursor state with the average position
 	return &EnhancedCursorState{
-		Position:     [3]float64{sumX / count, sumY / count, sumZ / count},
-		Velocity:     [3]float64{0, 0, 0}, // Simplified: no velocity calculation
-		Acceleration: [3]float64{0, 0, 0}, // Simplified: no acceleration calculation
-		IsVisible:    true,
-		Confidence:   0.8,
+		Position: [3]float64{sumX / count, sumY / count, sumZ / count},
+		Mask:     [][][]float64{}, // Provide empty mask for now
 	}, nil
+}
+
+// EnhancedCursorState represents the detected cursor state with additional information
+type EnhancedCursorState struct {
+	Position [3]float64    `json:"position"`
+	Mask     [][][]float64 `json:"mask"`
+	Visible  bool          `json:"visible"`
 }

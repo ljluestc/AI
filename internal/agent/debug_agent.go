@@ -39,7 +39,7 @@ func NewDebugAgent(cfg config.Config) (*DebugAgent, error) {
 
 	return &DebugAgent{
 		VisionModel:    vision.NewVisionTransformer(5, true),
-		RLModel:        rl.NewDQN(100, 10, rl.NewBuddyMemory(1024*1024)),
+		RLModel:        rl.NewDQN(100, 10, &rl.BuddyMemory{Size: 1024 * 1024}),
 		KnowledgeGraph: kg,
 		Logger:         logrus.New(),
 		Clients:        make(map[*websocket.Conn]bool),
@@ -48,7 +48,18 @@ func NewDebugAgent(cfg config.Config) (*DebugAgent, error) {
 
 // HandleVision processes the vision input and returns the cursor state
 func (a *DebugAgent) HandleVision(input vision.VisionInput) (*vision.CursorState, error) {
-	return a.VisionModel.Process(input)
+	enhancedState, err := a.VisionModel.Process(input)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert EnhancedCursorState to CursorState
+	cursorState := &vision.CursorState{
+		Position: enhancedState.Position,
+		Visible:  enhancedState.Visible,
+	}
+
+	return cursorState, nil
 }
 
 // HandleDiagnosis processes the cursor state and returns the diagnosis result
@@ -58,7 +69,16 @@ func (a *DebugAgent) HandleDiagnosis(state *vision.CursorState) (*knowledge.Diag
 
 // HandlePlanning processes the diagnosis result and returns the action to take
 func (a *DebugAgent) HandlePlanning(state *vision.CursorState) (rl.Action, error) {
-	return a.RLModel.SelectAction(state.Position[:], 0.1)
+	actionType, err := a.RLModel.SelectAction(state.Position[:], 0.1)
+	if err != nil {
+		return rl.Action{}, err
+	}
+
+	// Convert ActionType to rl.Action
+	return rl.Action{
+		ID:          fmt.Sprintf("%v", actionType),
+		Description: fmt.Sprintf("Action %v", actionType),
+	}, nil
 }
 
 // HandleExecution executes the action and returns the result
@@ -66,7 +86,7 @@ func (a *DebugAgent) HandleExecution(action rl.Action) (*ExecutionResult, error)
 	// Implementation details would depend on what actions need to be executed
 	return &ExecutionResult{
 		Success: true,
-		Message: fmt.Sprintf("Executed action %s", action.Name),
+		Message: fmt.Sprintf("Executed action %s", action.ID),
 	}, nil
 }
 
